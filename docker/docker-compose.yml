@@ -1,0 +1,75 @@
+services:
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web UI
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: admin12345
+    command: server /data --console-address ":9001"
+    volumes:
+      - ./minio_data:/data
+
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: namenode
+    restart: unless-stopped
+    environment:
+      - CLUSTER_NAME=hadoop-cluster
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+    volumes:
+      - namenode_data:/hadoop/dfs/name
+    ports:
+      - "9870:9870"   # NameNode web UI only (no 9000 here to avoid conflict)
+    depends_on:
+      - minio
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode
+    restart: unless-stopped
+    environment:
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+      - SERVICE_PRECONDITION=namenode:9870
+    volumes:
+      - datanode_data:/hadoop/dfs/data
+    depends_on:
+      - namenode
+
+  app:
+    build: ./app
+    container_name: bigdata_app
+    restart: "no"
+    depends_on:
+      - minio
+      - namenode
+      - datanode
+    environment:
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: admin
+      MINIO_SECRET_KEY: admin12345
+      HDFS_WEB_ENDPOINT: http://namenode:9870
+      HDFS_NAMENODE: hdfs://namenode:9000
+    volumes:
+      - ./app:/usr/src/app
+
+  dashboard:
+    build: ./dashboard
+    container_name: bigdata_dashboard
+    restart: unless-stopped
+    depends_on:
+      - minio
+    ports:
+      - "8501:8501"
+    environment:
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: admin
+      MINIO_SECRET_KEY: admin12345
+
+volumes:
+  namenode_data:
+  datanode_data:
+  minio_data:
