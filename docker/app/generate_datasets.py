@@ -24,11 +24,17 @@ np.random.seed(42)
 # HELPER FUNCTIONS
 # -----------------------------
 
-def random_datetime(start, end):
-    """Return a random datetime between start and end."""
-    delta = end - start
-    rand_sec = random.randint(0, int(delta.total_seconds()))
-    return start + timedelta(seconds=rand_sec)
+def generate_all_hour_datetimes(start_dt, end_dt):
+    """Generate all possible hour-level datetimes between start and end dates."""
+    current = start_dt.replace(minute=0, second=0, microsecond=0)
+    end = end_dt.replace(minute=0, second=0, microsecond=0)
+    
+    all_hours = []
+    while current <= end:
+        all_hours.append(current)
+        current += timedelta(hours=1)
+    
+    return all_hours
 
 
 def format_datetime_messy(dt):
@@ -146,22 +152,28 @@ def main():
     """
     Entry point used by run_all.py.
 
-    - Builds shared datetime pool
+    - Generates all possible hour datetimes for the year
+    - Traffic: random sampling with replacement (allows duplicates)
+    - Weather: random sampling without replacement (unique datetimes)
     - Generates weather_raw.csv
     - Generates traffic_raw.csv
     """
     # -----------------------------
-    # 1) GENERATE BASE DATETIMES
+    # 1) GENERATE ALL POSSIBLE HOUR DATETIMES
     # -----------------------------
     start_dt = datetime(2024, 1, 1)
     end_dt = datetime(2024, 12, 31, 23, 59, 59)
 
-    # Create a pool of datetimes to share between weather & traffic so joins are possible
-    pool_size = 3000
-    datetime_pool = [random_datetime(start_dt, end_dt) for _ in range(pool_size)]
+    # Generate all possible hour-level datetimes for the year
+    all_hour_datetimes = generate_all_hour_datetimes(start_dt, end_dt)
+    print(f"Generated {len(all_hour_datetimes)} possible hour datetimes for 2024")
 
-    weather_datetimes = [random.choice(datetime_pool) for _ in range(N_WEATHER_ROWS)]
-    traffic_datetimes = [random.choice(datetime_pool) for _ in range(N_TRAFFIC_ROWS)]
+    # Sample datetimes for each dataset
+    # Traffic: random choice with replacement (duplicates allowed)
+    traffic_datetimes = [random.choice(all_hour_datetimes) for _ in range(N_TRAFFIC_ROWS)]
+    
+    # Weather: random sample without replacement (unique datetimes)
+    weather_datetimes = random.sample(all_hour_datetimes, N_WEATHER_ROWS)
 
     # -----------------------------
     # 2) GENERATE WEATHER DATASET
@@ -274,5 +286,4 @@ def main():
 
 
 if __name__ == "__main__":
-    # Allows running `python generate_datasets.py` manually
     main()
