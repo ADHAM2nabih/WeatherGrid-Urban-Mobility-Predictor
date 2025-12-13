@@ -136,12 +136,12 @@ def standardize_city(series: pd.Series) -> pd.Series:
     """
     def clean_city(x):
         if pd.isna(x):
-            return np.nan
+            return "London"
         s = str(x).strip().lower()
         if any(tok in s for tok in ["lond", "lonodn", "ldnon"]):
             return "London"
         if s == "":
-            return np.nan
+            return "London"
         # fallback: capitalize first letter
         return s.capitalize()
 
@@ -150,11 +150,33 @@ def standardize_city(series: pd.Series) -> pd.Series:
 
 def parse_datetime_column(series: pd.Series) -> pd.Series:
     """
-    Convert messy date strings (multiple formats, invalid values) to datetime.
-    Invalid values -> NaT.
+    Simple datetime parser for the specific formats generated above.
     """
-    # infer_datetime_format is now default, so we don't pass the deprecated arg
-    return pd.to_datetime(series, errors="coerce", dayfirst=True)
+    # These are the exact formats from your data generation
+    formats_to_try = [
+        "%Y-%m-%d %H:%M:%S", 
+        "%d-%m-%Y %H:%M",        
+        "%d %b %Y %H:%M",        
+        "%B %d, %Y %H:%M",      
+        "%d.%m.%Y %H:%M",        
+        "%d/%m/%Y %H:%M:%S",     
+    ]
+    
+    parsed = pd.Series(index=series.index, dtype='datetime64[ns]')
+    
+    for fmt in formats_to_try:
+        # Try this format on remaining unparsed values
+        mask = parsed.isna()
+        if not mask.any():
+            break
+        try:
+            temp = pd.to_datetime(series[mask], format=fmt, errors='coerce')
+            parsed[mask] = temp
+        except:
+            continue
+    
+    logger.info(f"DateTime parsing: {len(series)} total, {parsed.notna().sum()} successfully parsed")
+    return parsed
 
 
 def clean_numeric_column(
@@ -233,7 +255,7 @@ def deduplicate_by_datetime(df: pd.DataFrame, dataset_name: str) -> pd.DataFrame
         elif df[col].dtype in ['float64', 'int64', 'float32', 'int32']:
             agg_dict[col] = 'mean'
         else:
-            agg_dict[col] = 'first'  # categorical columns - take first occurrence
+            agg_dict[col] = 'first'
     
     # Group by city + date_time and aggregate
     df_agg = df.groupby(['city', 'date_time'], as_index=False).agg(agg_dict)
@@ -245,7 +267,7 @@ def deduplicate_by_datetime(df: pd.DataFrame, dataset_name: str) -> pd.DataFrame
 
 
 def clean_weather_df(df: pd.DataFrame) -> pd.DataFrame:
-    logger.info("Cleaning weather dataset...")
+    logger.info(f"Cleaning weather dataset... Starting with {len(df)} rows")
 
     df = df.copy()
 
@@ -268,10 +290,19 @@ def clean_weather_df(df: pd.DataFrame) -> pd.DataFrame:
             df[col] = np.nan
 
     # Date/time
+    logger.info(f"Weather: parsing datetime column...")
+    before_datetime = len(df)
     df["date_time"] = parse_datetime_column(df["date_time"])
+    datetime_nulls = df["date_time"].isna().sum()
+    logger.info(f"Weather: {datetime_nulls} out of {before_datetime} datetime values became NaT after parsing")
 
     # City
+    logger.info(f"Weather: cleaning city column...")
+    before_city = df["city"].isna().sum()
     df["city"] = standardize_city(df["city"])
+    after_city = df["city"].isna().sum()
+    logger.info(f"Weather: city nulls changed from {before_city} to {after_city}")
+    logger.info(f"Weather: city values after cleaning: {df['city'].value_counts().head()}")
 
     # Numeric columns
     df["temperature_c"] = clean_numeric_column(df["temperature_c"], -30, 60)
@@ -312,18 +343,21 @@ def clean_weather_df(df: pd.DataFrame) -> pd.DataFrame:
 
     # Drop rows without date_time or city because we can't join them later
     before = len(df)
+    missing_datetime = df["date_time"].isna().sum()
+    missing_city = df["city"].isna().sum()
+    logger.info(f"Weather: before drop - missing datetime: {missing_datetime}, missing city: {missing_city}")
     df = df.dropna(subset=["date_time", "city"])
     after = len(df)
-    logger.info(f"Weather: dropped {before - after} rows with missing city/date_time")
+    logger.info(f"Weather: dropped {before - after} rows with missing city/date_time ({after} remaining)")
 
     # NEW: Deduplicate by city + date_time
     df = deduplicate_by_datetime(df, "Weather")
-
+    logger.info(f"Weather: final row count after deduplication: {len(df)}")
     return df
 
 
 def clean_traffic_df(df: pd.DataFrame) -> pd.DataFrame:
-    logger.info("Cleaning traffic dataset...")
+    logger.info(f"Cleaning traffic dataset... Starting with {len(df)} rows")
 
     df = df.copy()
 
@@ -346,10 +380,19 @@ def clean_traffic_df(df: pd.DataFrame) -> pd.DataFrame:
             df[col] = np.nan
 
     # Date/time
+    logger.info(f"Traffic: parsing datetime column...")
+    before_datetime = len(df)
     df["date_time"] = parse_datetime_column(df["date_time"])
+    datetime_nulls = df["date_time"].isna().sum()
+    logger.info(f"Traffic: {datetime_nulls} out of {before_datetime} datetime values became NaT after parsing")
 
     # City
+    logger.info(f"Traffic: cleaning city column...")
+    before_city = df["city"].isna().sum()
     df["city"] = standardize_city(df["city"])
+    after_city = df["city"].isna().sum()
+    logger.info(f"Traffic: city nulls changed from {before_city} to {after_city}")
+    logger.info(f"Traffic: city values after cleaning: {df['city'].value_counts().head()}")
 
     # Numeric columns
     df["vehicle_count"] = clean_numeric_column(df["vehicle_count"], 0, 20000)
@@ -400,13 +443,16 @@ def clean_traffic_df(df: pd.DataFrame) -> pd.DataFrame:
 
     # Drop rows without date_time or city
     before = len(df)
+    missing_datetime = df["date_time"].isna().sum()
+    missing_city = df["city"].isna().sum()
+    logger.info(f"Traffic: before drop - missing datetime: {missing_datetime}, missing city: {missing_city}")
     df = df.dropna(subset=["date_time", "city"])
     after = len(df)
-    logger.info(f"Traffic: dropped {before - after} rows with missing city/date_time")
+    logger.info(f"Traffic: dropped {before - after} rows with missing city/date_time ({after} remaining)")
 
     # NEW: Deduplicate by city + date_time
     df = deduplicate_by_datetime(df, "Traffic")
-
+    logger.info(f"Traffic: final row count after deduplication: {len(df)}")
     return df
 
 
