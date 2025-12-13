@@ -201,6 +201,49 @@ def standardize_categorical(series: pd.Series, mapping: Dict[str, str]) -> pd.Se
     return series.apply(normalize)
 
 
+def deduplicate_by_datetime(df: pd.DataFrame, dataset_name: str) -> pd.DataFrame:
+    """
+    Handle rows with duplicate city + date_time by aggregating:
+    - Numeric columns: take mean
+    - Categorical columns: take first (mode would be better but more complex)
+    - ID columns: take first
+    """
+    before_count = len(df)
+    
+    # Check for duplicates
+    duplicates = df.duplicated(subset=['city', 'date_time'], keep=False)
+    if not duplicates.any():
+        logger.info(f"{dataset_name}: No datetime duplicates found")
+        return df
+    
+    duplicate_count = duplicates.sum()
+    logger.info(f"{dataset_name}: Found {duplicate_count} duplicate datetime entries, aggregating...")
+    
+    # Separate ID and non-aggregatable columns
+    id_cols = [col for col in df.columns if 'id' in col.lower()]
+    datetime_cols = ['date_time']
+    city_cols = ['city']
+    
+    # Define aggregation rules
+    agg_dict = {}
+    
+    for col in df.columns:
+        if col in id_cols + datetime_cols + city_cols:
+            agg_dict[col] = 'first'
+        elif df[col].dtype in ['float64', 'int64', 'float32', 'int32']:
+            agg_dict[col] = 'mean'
+        else:
+            agg_dict[col] = 'first'  # categorical columns - take first occurrence
+    
+    # Group by city + date_time and aggregate
+    df_agg = df.groupby(['city', 'date_time'], as_index=False).agg(agg_dict)
+    
+    after_count = len(df_agg)
+    logger.info(f"{dataset_name}: Reduced from {before_count} to {after_count} rows after deduplication")
+    
+    return df_agg
+
+
 def clean_weather_df(df: pd.DataFrame) -> pd.DataFrame:
     logger.info("Cleaning weather dataset...")
 
@@ -272,6 +315,9 @@ def clean_weather_df(df: pd.DataFrame) -> pd.DataFrame:
     df = df.dropna(subset=["date_time", "city"])
     after = len(df)
     logger.info(f"Weather: dropped {before - after} rows with missing city/date_time")
+
+    # NEW: Deduplicate by city + date_time
+    df = deduplicate_by_datetime(df, "Weather")
 
     return df
 
@@ -357,6 +403,9 @@ def clean_traffic_df(df: pd.DataFrame) -> pd.DataFrame:
     df = df.dropna(subset=["date_time", "city"])
     after = len(df)
     logger.info(f"Traffic: dropped {before - after} rows with missing city/date_time")
+
+    # NEW: Deduplicate by city + date_time
+    df = deduplicate_by_datetime(df, "Traffic")
 
     return df
 
@@ -478,9 +527,9 @@ def run_etl():
     weather_clean_df["date_time"] = pd.to_datetime(weather_clean_df["date_time"])
     traffic_clean_df["date_time"] = pd.to_datetime(traffic_clean_df["date_time"])
 
-    # NEW: join on city + DATE (not full timestamp) to get more matches
-    weather_clean_df["date"] = weather_clean_df["date_time"].dt.date
-    traffic_clean_df["date"] = traffic_clean_df["date_time"].dt.date
+    # NEW: Keep full datetime but call it "date" for compatibility with downstream steps
+    weather_clean_df["date"] = weather_clean_df["date_time"]
+    traffic_clean_df["date"] = traffic_clean_df["date_time"]
 
     merged_df = pd.merge(
         traffic_clean_df,
