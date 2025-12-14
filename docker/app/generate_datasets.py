@@ -3,13 +3,10 @@ This module:
 - Creates two messy datasets (weather, traffic)
 - Saves them as CSV so ETL can upload them to MinIO (Bronze layer)
 """
-
 import random
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-
-
 # -----------------------------
 # CONFIG
 # -----------------------------
@@ -18,31 +15,30 @@ N_TRAFFIC_ROWS = 10000
 
 random.seed(42)
 np.random.seed(42)
-
-
 # -----------------------------
 # HELPER FUNCTIONS
 # -----------------------------
 
-def random_datetime(start, end):
-    """Return a random datetime between start and end."""
-    delta = end - start
-    rand_sec = random.randint(0, int(delta.total_seconds()))
-    return start + timedelta(seconds=rand_sec)
+def generate_all_hour_datetimes(start_dt, end_dt):
+    """Generate all possible hour-level datetimes between start and end dates."""
+    current = start_dt.replace(minute=0, second=0, microsecond=0)
+    end = end_dt.replace(minute=0, second=0, microsecond=0)
+    
+    all_hours = []
+    while current <= end:
+        all_hours.append(current)
+        current += timedelta(hours=1)
+    
+    return all_hours
 
 
 def format_datetime_messy(dt):
     """
-    Return the same datetime in different random formats
-    to simulate messy date formats.
+    Return datetime in clean, standard formats that pandas can easily parse.
+    Always includes time component to avoid merge conflicts.
     """
     formats = [
-        "%Y-%m-%d %H:%M:%S",   # 2024-01-15 13:45:00
-        "%d-%m-%Y %H:%M",      # 15-01-2024 13:45
-        "%m/%d/%Y %H:%M",      # 01/15/2024 13:45
-        "%Y/%m/%d",            # 2024/01/15
-        "%d %b %Y %H:%M",      # 15 Jan 2024 13:45
-        "%Y-%m-%d"             # 2024-01-15
+        "%Y-%m-%d %H:%M:%S",   # 2024-01-15 13:45:00 (ISO format with seconds)
     ]
     fmt = random.choice(formats)
     return dt.strftime(fmt)
@@ -50,15 +46,24 @@ def format_datetime_messy(dt):
 
 def inject_datetime_noise(dt_str):
     """
-    Occasionally replace a valid datetime string with invalid or missing values.
+    Convert ~5% of clean datetime strings to different challenging formats.
+    Tests the ETL's ability to parse varied datetime formats.
     """
     r = random.random()
-    if r < 0.03:   # 3% invalid string
-        return "not-a-date"
-    elif r < 0.06:  # 3% empty
-        return ""
-    else:
-        return dt_str
+    if r < 0.05:
+        try:
+            dt = pd.to_datetime(dt_str)
+            alternative_formats = [
+                dt.strftime("%d-%m-%Y %H:%M"),        # 15-01-2024 13:45
+                dt.strftime("%d %b %Y %H:%M"),        # 15 Jan 2024 13:45
+                dt.strftime("%B %d, %Y %H:%M"),       # January 15, 2024 13:45
+                dt.strftime("%d.%m.%Y %H:%M"),        # 15.01.2024 13:45
+                dt.strftime("%d/%m/%Y %H:%M:%S")     # 15/01/2024 13:45:00
+            ]
+            return random.choice(alternative_formats)
+        except:
+            return dt_str
+    return dt_str
 
 
 def random_city_with_noise():
@@ -146,29 +151,35 @@ def main():
     """
     Entry point used by run_all.py.
 
-    - Builds shared datetime pool
+    - Generates all possible hour datetimes for the year
+    - Traffic: random sampling with replacement (allows duplicates)
+    - Weather: random sampling without replacement (unique datetimes)
     - Generates weather_raw.csv
     - Generates traffic_raw.csv
     """
     # -----------------------------
-    # 1) GENERATE BASE DATETIMES
+    # 1) GENERATE ALL POSSIBLE HOUR DATETIMES
     # -----------------------------
     start_dt = datetime(2024, 1, 1)
     end_dt = datetime(2024, 12, 31, 23, 59, 59)
 
-    # Create a pool of datetimes to share between weather & traffic so joins are possible
-    pool_size = 3000
-    datetime_pool = [random_datetime(start_dt, end_dt) for _ in range(pool_size)]
+    # Generate all possible hour-level datetimes for the year
+    all_hour_datetimes = generate_all_hour_datetimes(start_dt, end_dt)
+    print(f"Generated {len(all_hour_datetimes)} possible hour datetimes for 2024")
 
-    weather_datetimes = [random.choice(datetime_pool) for _ in range(N_WEATHER_ROWS)]
-    traffic_datetimes = [random.choice(datetime_pool) for _ in range(N_TRAFFIC_ROWS)]
+    # Sample datetimes for each dataset
+    # Traffic: random choice with no replacement
+    traffic_datetimes = random.sample(all_hour_datetimes, min(len(all_hour_datetimes), N_TRAFFIC_ROWS))
+    
+    # Weather: random sample without replacement (unique datetimes)
+    weather_datetimes = random.sample(traffic_datetimes, N_WEATHER_ROWS)
 
     # -----------------------------
     # 2) GENERATE WEATHER DATASET
     # -----------------------------
     weather_records = []
 
-    for i in range(N_WEATHER_ROWS):
+    for i in range(len(weather_datetimes)):
         dt = weather_datetimes[i]
         # start with clean formatted datetime
         dt_str = format_datetime_messy(dt)
@@ -226,7 +237,7 @@ def main():
     areas = ["Central", "North", "South", "East", "West", "Downtown", "Suburb-A", "Suburb-B"]
     event_types = ["None", "Roadwork", "SportsEvent", "Concert", "Parade"]
 
-    for i in range(N_TRAFFIC_ROWS):
+    for i in range(len(traffic_datetimes)):
         dt = traffic_datetimes[i]
         dt_str = format_datetime_messy(dt)
         dt_str = inject_datetime_noise(dt_str)
@@ -272,7 +283,5 @@ def main():
     print(f" - weather_raw.csv  (rows: {len(weather_df)})")
     print(f" - traffic_raw.csv  (rows: {len(traffic_df)})")
 
-
 if __name__ == "__main__":
-    # Allows running `python generate_datasets.py` manually
     main()
