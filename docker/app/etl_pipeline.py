@@ -145,12 +145,12 @@ def standardize_city(series: pd.Series) -> pd.Series:
     """
     def clean_city(x):
         if pd.isna(x):
-            return np.nan
+            return "London"
         s = str(x).strip().lower()
         if any(tok in s for tok in ["lond", "lonodn", "ldnon"]):
             return "London"
         if s == "":
-            return np.nan
+            return "London"
         # fallback: capitalize first letter
         return s.capitalize()
 
@@ -626,5 +626,6 @@ def run_etl():
 
 if __name__ == "__main__":
     run_etl()
+
 
 
