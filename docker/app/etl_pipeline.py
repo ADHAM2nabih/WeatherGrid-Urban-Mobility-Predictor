@@ -110,18 +110,27 @@ def get_hdfs_client() -> InsecureClient:
     logger.info(f"Instantiated {client}.")
     return client
 
+def upload_to_hdfs(client: InsecureClient, local_path: str, hdfs_dir: str):
+    """
+    Upload local file to HDFS directory (stable & correct).
+    """
+    filename = os.path.basename(local_path)
 
-def upload_to_hdfs(client: InsecureClient, local_path: str, hdfs_path: str):
-    """
-    Upload local file to HDFS path, overwrite if exists.
-    """
-    logger.info(f"Uploading to HDFS: {local_path} -> {hdfs_path}")
-    client.makedirs(os.path.dirname(hdfs_path))
-    logger.info(f"Uploading '{os.path.basename(local_path)}' to '{hdfs_path}'.")
-    client.upload(hdfs_path, local_path, overwrite=True)
-    logger.info(f"Listing '{hdfs_path}'.")
-    client.list(hdfs_path)
-    logger.info(f"Writing to '{hdfs_path}'.")
+    logger.info(f"Uploading to HDFS: {local_path} -> {hdfs_dir}/{filename}")
+
+    # Create directory if not exists
+    client.makedirs(hdfs_dir)
+
+    # Upload file INTO directory (not file path)
+    client.upload(
+        hdfs_path=hdfs_dir,
+        local_path=local_path,
+        overwrite=True
+    )
+
+    # Optional: list directory to verify
+    logger.info(f"Listing HDFS directory '{hdfs_dir}'")
+    client.list(hdfs_dir)
 
 
 # ------------------------------------------------------------------------------
@@ -136,12 +145,12 @@ def standardize_city(series: pd.Series) -> pd.Series:
     """
     def clean_city(x):
         if pd.isna(x):
-            return np.nan
+            return "London"
         s = str(x).strip().lower()
         if any(tok in s for tok in ["lond", "lonodn", "ldnon"]):
             return "London"
         if s == "":
-            return np.nan
+            return "London"
         # fallback: capitalize first letter
         return s.capitalize()
 
@@ -554,12 +563,12 @@ def run_etl():
             upload_to_hdfs(
                 hdfs_client,
                 weather_clean_path,
-                "/data/weather/clean/weather_clean.parquet",
+                "/data/weather/clean",
             )
             upload_to_hdfs(
                 hdfs_client,
                 traffic_clean_path,
-                "/data/traffic/clean/traffic_clean.parquet",
+                "/data/traffic/clean",
             )
         except Exception as e:
             logger.warning(f"Failed to upload cleaned data to HDFS: {e}")
@@ -617,4 +626,6 @@ def run_etl():
 
 if __name__ == "__main__":
     run_etl()
+
+
 

@@ -168,11 +168,11 @@ def main():
     print(f"Generated {len(all_hour_datetimes)} possible hour datetimes for 2024")
 
     # Sample datetimes for each dataset
-    # Traffic: random choice with no replacement
-    traffic_datetimes = random.sample(all_hour_datetimes, min(len(all_hour_datetimes), N_TRAFFIC_ROWS))
+    # Traffic: random choice with replacement
+    traffic_datetimes = np.random.choice(all_hour_datetimes, N_TRAFFIC_ROWS, replace=True)
     
     # Weather: random sample without replacement (unique datetimes)
-    weather_datetimes = random.sample(traffic_datetimes, N_WEATHER_ROWS)
+    weather_datetimes = random.sample(list(traffic_datetimes), N_WEATHER_ROWS)
 
     # -----------------------------
     # 2) GENERATE WEATHER DATASET
@@ -285,3 +285,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
